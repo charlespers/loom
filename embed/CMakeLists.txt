@@ -1,5 +1,6 @@
 add_library(loom STATIC
   src/loom.cpp
+  src/hooks.cpp
 )
 
 target_include_directories(loom
