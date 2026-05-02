@@ -1,0 +1,60 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-14]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: true
+          cache-dependency-path: |
+            cli/go.sum
+            daemon/go.sum
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "3.27.x"
+
+      - name: Show toolchain versions
+        run: |
+          cmake --version
+          go version
+          c++ --version
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build C++ targets
+        run: cmake --build build -j
+
+      - name: ctest
+        working-directory: build
+        run: ctest --output-on-failure
+
+      - name: Build Go workspace
+        run: |
+          go build -o build/loom-daemon ./daemon/cmd/loom-daemon
+          go build -o build/loom         ./cli/cmd/loom
+
+      - name: go test (module-local)
+        run: |
+          (cd cli    && go test ./...)
+          (cd daemon && go test ./...)
+
+      - name: End-to-end smoke
+        run: ./tools/smoke.sh
