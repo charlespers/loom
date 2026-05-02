@@ -84,7 +84,7 @@ Three components, three processes, one shared file region.
   │  multimodal SDK / app)   │   ─────────
   │                          │
   │  C++ embed lib           │   <300 ns hot path:
-  │  - liblooom.a (static)   │   atomic seq++,
+  │  - libloom.a (static)   │   atomic seq++,
   │  - loom.h (public API)   │   memcpy into ring slot
   │  - loom_hooks.h (no-op   │
   │    weak symbols, opt-in) │
@@ -130,7 +130,7 @@ Three components, three processes, one shared file region.
    command with `LOOM_RUN_ID` and `LOOM_RING_PATH` set in env.
 2. The consumer's embed lib reads those env vars on `loom::init()` and attaches
    to the ring. If the env vars are absent, every `loom::*` call is a no-op.
-   So a binary linked against `liblooom.a` but launched outside `loom run`
+   So a binary linked against `libloom.a` but launched outside `loom run`
    does no work and pays no cost beyond the unconditional symbol lookups
    resolved at link time.
 3. The daemon drains the ring, applies the redaction pipeline, appends to the
@@ -239,7 +239,7 @@ daemon supports the previous version for one minor-release deprecation window.
 
 ## 5. Embed library — C++ public API
 
-The library is a static archive `liblooom.a` plus headers. C++17, no external
+The library is a static archive `libloom.a` plus headers. C++17, no external
 runtime dependencies, no exceptions across the API boundary.
 
 ### 5.1 `loom.h`
@@ -344,7 +344,7 @@ Bedrock, whose contract requires byte-identical default builds):
 
 ```c
 // loom_hooks.h — weak-symbol stubs. No dependency on <loom.h>.
-// When liblooom.a is not linked, these resolve to no-op declarations with
+// When libloom.a is not linked, these resolve to no-op declarations with
 // linker-provided null bodies on platforms that support weak symbols.
 #ifdef __cplusplus
 extern "C" {
@@ -365,7 +365,7 @@ __attribute__((weak)) void loom_hook_lifecycle (const char* marker);
 #endif
 ```
 
-When `liblooom.a` is linked, strong symbols override and forward into the full
+When `libloom.a` is linked, strong symbols override and forward into the full
 embed lib. When it is not, the unreferenced weak symbols resolve to address
 zero, and call sites must guard with a null check:
 
@@ -556,6 +556,22 @@ ui:
 
 Every field has a default, so a zero-config install runs.
 
+### 8.1 Runtime environment variables
+
+Loom honors a small set of env vars for ergonomics, sandboxing, and CI
+isolation. They override the corresponding `loom.config.yaml` keys when set.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `LOOM_RUN_ID` | unset | Set by `loom run` for the child process. The embed lib treats its absence as "no harness attached" and becomes no-op. Direct callers may set it manually for testing. |
+| `LOOM_RING_PATH` | unset | Path to the mmap'd ring file. Set by `loom run`. |
+| `LOOM_HOME` | `~/.loom` | Root of artifact storage. CI sets this to a temp dir for hermetic test runs. |
+| `LOOM_TMPDIR` | `/tmp` | Root for transient ring files (`<LOOM_TMPDIR>/loom/<run-id>/ring`). |
+| `LOOM_CONFIG` | unset | Explicit path to a `loom.config.yaml` overriding discovery. |
+
+These variables are part of the public contract; renaming any of them is a
+breaking change.
+
 ## 9. Performance budget
 
 These targets are pinned in microbenchmarks under `embed/bench/`. CI fails if
@@ -685,7 +701,7 @@ linked.
 ## 13. Build and release
 
 - **Embed lib:** CMake, C++17, position-independent static archive
-  `liblooom.a` plus headers. Optional shared `liblooom.so`. Cross-compiled to
+  `libloom.a` plus headers. Optional shared `libloom.so`. Cross-compiled to
   `linux/aarch64` for Jetson via toolchain file.
 - **Daemon and CLI:** Go 1.21, `CGO_ENABLED=0` so binaries are fully static.
   Cross-compile matrix `{darwin, linux} × {amd64, arm64}` via `goreleaser`.
