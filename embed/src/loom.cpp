@@ -94,6 +94,14 @@ void emit(const char* cat, const char* name, size_t name_len) {
 }  // namespace
 
 extern "C" int loom_init(void) {
+  // Idempotent: a process that links libloom auto-initializes via the
+  // constructor below, and may also call loom::init() explicitly. Second
+  // and later calls are cheap no-ops.
+  if (loom::detail::g_events_file != nullptr ||
+      loom::detail::g_active.load(std::memory_order_acquire)) {
+    return 0;
+  }
+
   const char* run_id = std::getenv("LOOM_RUN_ID");
   if (!run_id || !*run_id) return 0;  // stay inactive
 
@@ -109,6 +117,15 @@ extern "C" int loom_init(void) {
   loom::detail::g_active.store(true, std::memory_order_release);
   return 0;
 }
+
+// Auto-init when libloom is linked into a process. A consumer that does
+// nothing more than link liblooom.a still gets observed (provided
+// LOOM_RUN_ID is set in env). This is what makes bedrock's loom_hooks.h
+// path work without bedrock_bench having to call loom::init().
+__attribute__((constructor))
+static void loom_auto_init(void)     { loom_init(); }
+__attribute__((destructor))
+static void loom_auto_shutdown(void) { loom_shutdown(); }
 
 extern "C" void loom_shutdown(void) {
   bool was_active = loom::detail::g_active.exchange(false, std::memory_order_acq_rel);
