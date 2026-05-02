@@ -18,7 +18,6 @@ set_target_properties(loom PROPERTIES
 
 if(LOOM_BUILD_TESTS)
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt)
-    enable_testing()
     add_subdirectory(tests)
   endif()
 endif()

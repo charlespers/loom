@@ -16,6 +16,10 @@ endif()
 option(LOOM_BUILD_TESTS "Build embed-lib unit tests" ON)
 option(LOOM_BUILD_EXAMPLES "Build example programs" ON)
 
+if(LOOM_BUILD_TESTS)
+  enable_testing()
+endif()
+
 add_subdirectory(embed)
 
 if(LOOM_BUILD_EXAMPLES)
