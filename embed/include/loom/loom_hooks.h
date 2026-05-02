@@ -10,6 +10,12 @@
 // address zero. The LOOM_HOOK macro guards call sites with a null check
 // that branch-predicts to "not taken" on the off-path build, achieving the
 // ±0.5% byte-and-perf identity that Bedrock's contract requires.
+//
+// Platform note (macOS): Apple's linker rejects undefined weak symbols by
+// default. Consumers that include this header without linking liblooom must
+// pass `-Wl,-undefined,dynamic_lookup` (or equivalent CMake
+// `target_link_options`). On Linux and Jetson Linux/aarch64 no extra flags
+// are needed.
 #pragma once
 
 #ifdef __cplusplus

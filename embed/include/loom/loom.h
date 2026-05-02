@@ -92,7 +92,7 @@ class Span {
     auto b  = detail::encode(attrs);
     handle_ = loom_span_begin(name.data(), name.size(), b.bytes, b.len);
   }
-  ~Span() {
+  ~Span() noexcept {
     if (handle_) loom_span_end(handle_);
   }
   Span(const Span&)            = delete;

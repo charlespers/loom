@@ -49,6 +49,12 @@ void loom_lifecycle(const char* marker, size_t marker_len,
 // In M1 these are declared but not implemented; M2 will implement the
 // flat encoding. The C++ wrapper still calls them so the API shape is
 // pinned now.
+//
+// NOTE on Bytes: the spec § 5.1 names a Bytes attribute variant. M1
+// pins {i64, f64, str, bool} only because the binary payload is not yet
+// wire-encoded. M2 introduces `loom_attrs_bytes(...)` and a matching
+// `AttrValue::Tag::Bytes` in <loom.h>. Callers should NOT depend on the
+// absence of Bytes in M1; new producers should plan for it.
 size_t loom_attrs_begin(uint8_t* buf, size_t buf_cap);
 size_t loom_attrs_i64  (uint8_t* buf, size_t buf_cap, size_t off,
                         const char* key, size_t key_len, int64_t v);
