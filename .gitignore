@@ -31,6 +31,7 @@ CMakeFiles/
 cmake_install.cmake
 Makefile
 !Makefile
+/compile_commands.json
 
 # Coverage
 *.gcda
