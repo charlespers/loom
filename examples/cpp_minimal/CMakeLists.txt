@@ -1,2 +1,2 @@
-# placeholder
-add_custom_target(cpp_minimal_placeholder)
+add_executable(cpp_minimal main.cpp)
+target_link_libraries(cpp_minimal PRIVATE loom)
