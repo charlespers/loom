@@ -37,3 +37,6 @@ Makefile
 *.gcda
 *.gcno
 coverage/
+
+# clangd cache
+.cache/
