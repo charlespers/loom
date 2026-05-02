@@ -1,0 +1,38 @@
+# Build artifacts
+build/
+build-*/
+cmake-build-*/
+*.o
+*.a
+*.so
+*.dylib
+
+# Go
+/daemon/loom-daemon
+/cli/loom
+
+# Examples
+/examples/cpp_minimal/build/
+/examples/cpp_minimal/cpp_minimal
+
+# Loom runtime artifacts
+/tmp/loom/
+~/.loom/runs/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+!Makefile
+
+# Coverage
+*.gcda
+*.gcno
+coverage/
