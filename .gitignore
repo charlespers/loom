@@ -15,9 +15,9 @@ cmake-build-*/
 /examples/cpp_minimal/build/
 /examples/cpp_minimal/cpp_minimal
 
-# Loom runtime artifacts
+# Loom runtime artifacts under the repo (the canonical artifact root
+# ~/.loom/runs is outside the repo and never seen by git).
 /tmp/loom/
-~/.loom/runs/
 
 # OS / editor
 .DS_Store

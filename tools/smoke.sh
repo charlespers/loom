@@ -22,7 +22,8 @@ go build -o build/loom-daemon ./daemon/cmd/loom-daemon
 go build -o build/loom         ./cli/cmd/loom
 
 echo "==> run Go unit tests"
-# Module-local, not workspace-root: Go 1.26 rejects ./... from workspace root.
+# Module-local, not workspace-root: Go workspaces (1.18+) do not expand
+# `./...` across modules from the workspace root, so we cd into each.
 (cd cli    && go test ./...)
 (cd daemon && go test ./...)
 
