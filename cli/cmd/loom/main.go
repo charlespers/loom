@@ -18,7 +18,10 @@ func main() {
 		Short: "Observability harness for local-compute AI systems",
 		Long: "Loom instruments local AI workloads. M1 ships skeleton " +
 			"plumbing only; ring buffer and artifacts arrive in M2.",
-		SilenceUsage: true,
+		// Silence both Cobra's auto-printed usage and its auto-printed error;
+		// main() owns error rendering so each error appears exactly once.
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 
 	root.AddCommand(&cobra.Command{
