@@ -9,18 +9,29 @@ event with a value, every span with a duration, a tamper-evident audit
 trail, and a human-readable run summary.
 
 ```
-$ loom run -- ./bedrock_bench weights/ runs/iter1/
+$ LOOM_MODEL_ID=tinyllama-1.1b LOOM_PROMPT_VERSION=rag-v3 \
+    loom run -- ./bedrock_bench weights/ runs/iter1/
 loom · run 01J3KTV6S5… · artifacts ~/.loom/runs/01J3KTV6S5…
 
-  ~/.loom/runs/01J3KTV6S5…/
-  ├── manifest.json        run metadata: process, host, counts, files, chain head
-  ├── events.jsonl         every event with v / cat / seq / ts / name / attrs
-  ├── audit.jsonl          private compliance trail (0600), SHA-256 hash chained
-  ├── audit.public.jsonl   redacted-attrs companion, safe to share
-  └── summary.md           designed per-run report (cover, lifecycle, spans, errors)
+$ loom
+ID            STATUS  AGE  DURATION  EVENTS  AUDIT  ERRORS  COMMAND
+───────────────────────────────────────────────────────────────────
+01J3KTV6…GZQ  ✓ ok     2s     8.7 s     312      4       0  bedrock_bench
+01J3KTRX…ABC  ✓ ok    3m      8.6 s     308      4       0  bedrock_bench
+
+$ loom show latest
+Run 01J3KTV6S5…GZQ   COMPLETED   8.7 s
+STARTED  May 2, 2026 · 22:28:41 UTC
+COMMAND  ./bedrock_bench weights/ runs/iter1/
+MODEL    tinyllama-1.1b
+PROMPT   rag-v3
+…
 
 $ loom verify latest
-verify: ✓ 14 audit records, head a9060cce…7798
+verify: ✓ 4 audit records, head a9060cce…7798
+
+$ loom report latest
+report: ✓ ~/.loom/runs/01J3KTV6S5…/report.html
 ```
 
 Loom is the deliberate counterpoint to the dark-factory style of the SDKs
@@ -44,16 +55,19 @@ small Go CLI, a designed run summary, a hash-chained audit trail.
 |-----------|----------------------------------------------------------------|--------|
 | M1        | Skeleton: repo, public API, CLI/daemon stubs, CI               | ✓      |
 | M2        | Rich event payloads, manifest, summary, audit chain, `verify`  | ✓      |
-| M3        | Field-level redaction, `report.html` single-file artifact      | next   |
+| M3        | Field-level `@public` redaction, single-file `report.html`, integrity-hash `verify` | ✓ |
+| M3.5      | Operator surface: `loom`/`ls`/`show`/`doctor`, reproducibility metadata | ✓ |
 | M4        | Designed TUI (`loom watch`, `loom view`)                       | —      |
 | M5        | Ring buffer + daemon (decode-loop hot path < 300 ns)           | —      |
 | M6        | Bedrock W4A16 inference-runtime integration                    | partial |
-| M7        | Python / Go bindings, `loom doctor`, release pipeline          | —      |
+| M7        | Python / Go bindings, release pipeline                         | —      |
 
-The M2-partial cut writes one event per `fwrite + fflush`. Suitable for
-debugging and integration testing. The decode-loop hot-path budget in the
-[design spec § 9](docs/design/2026-05-02-loom-design.md) lands with M5
-once the ring buffer + drain daemon ship.
+The current cut writes one event per `fwrite + fflush`. Suitable for
+debugging, integration testing, and any workload not running on Jetson's
+< 300 ns/span hot path. The proper ring buffer + drain daemon land in M5.
+
+See [`docs/intent.md`](docs/intent.md) for the use cases (healthcare, legal,
+finance, research, agent-on-files) driving every design decision.
 
 ## Quickstart
 
