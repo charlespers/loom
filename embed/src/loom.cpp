@@ -218,6 +218,20 @@ extern "C" int loom_init(void) {
   s.start_unix_ns = now_unix_ns();
   capture_process(s);
 
+  // Reproducibility metadata. Each is optional; absent values simply
+  // don't appear in manifest.json. Auditors look here to replay a
+  // decision later: same model + same prompt version + same seed
+  // should produce the same output_hash.
+  auto getenv_str = [](const char* name) -> std::string {
+    const char* v = std::getenv(name);
+    return v ? std::string(v) : std::string();
+  };
+  s.repro_model_id       = getenv_str("LOOM_MODEL_ID");
+  s.repro_model_hash     = getenv_str("LOOM_MODEL_HASH");
+  s.repro_prompt_version = getenv_str("LOOM_PROMPT_VERSION");
+  s.repro_seed           = getenv_str("LOOM_SEED");
+  s.repro_tag            = getenv_str("LOOM_RUN_TAG");
+
   mkdir_p(s.artifact_dir);
 
   s.events_file       = open_append(s.artifact_dir + "/events.jsonl",       0600);
@@ -259,13 +273,17 @@ extern "C" void loom_shutdown(void) {
     s.active.store(true, std::memory_order_release);
     loom_lifecycle("run.end", 7, nullptr, 0);
     s.active.store(false, std::memory_order_release);
+
+    // Flush and close before finalize_run so it can read the final
+    // bytes of events.jsonl + audit.jsonl to compute integrity hashes.
+    {
+      std::lock_guard<std::mutex> lk(s.write_mutex);
+      if (s.events_file)       { std::fflush(s.events_file);       std::fclose(s.events_file);       s.events_file       = nullptr; }
+      if (s.audit_file)        { std::fflush(s.audit_file);        std::fclose(s.audit_file);        s.audit_file        = nullptr; }
+      if (s.audit_public_file) { std::fflush(s.audit_public_file); std::fclose(s.audit_public_file); s.audit_public_file = nullptr; }
+    }
     finalize_run(s);
   }
-
-  std::lock_guard<std::mutex> lk(s.write_mutex);
-  if (s.events_file)       { std::fflush(s.events_file);       std::fclose(s.events_file);       s.events_file       = nullptr; }
-  if (s.audit_file)        { std::fflush(s.audit_file);        std::fclose(s.audit_file);        s.audit_file        = nullptr; }
-  if (s.audit_public_file) { std::fflush(s.audit_public_file); std::fclose(s.audit_public_file); s.audit_public_file = nullptr; }
 }
 
 extern "C" int loom_active(void) {
@@ -686,6 +704,23 @@ uint64_t file_lines(const std::string& path) {
   return lines;
 }
 
+// hash_file streams a file through SHA-256. Returns the empty string on
+// error (missing file, etc.) — auditors can detect this by the empty
+// hash and decide whether to fail or warn.
+std::string hash_file(const std::string& path) {
+  std::FILE* f = std::fopen(path.c_str(), "rb");
+  if (!f) return "";
+  Sha256 h;
+  uint8_t buf[8192];
+  while (true) {
+    size_t n = std::fread(buf, 1, sizeof(buf), f);
+    if (n == 0) break;
+    h.update(buf, n);
+  }
+  std::fclose(f);
+  return h.finalize_hex();
+}
+
 void write_manifest(State& s, uint64_t end_unix_ns, uint64_t duration_ms) {
   std::string path = s.artifact_dir + "/manifest.json";
   std::FILE* f = std::fopen(path.c_str(), "wb");
@@ -776,6 +811,46 @@ void write_manifest(State& s, uint64_t end_unix_ns, uint64_t duration_ms) {
                               : s.chain.head_hex) + "\",\n";
   out += "    \"count\": "  + std::to_string(s.chain.count) + "\n";
   out += "  },\n";
+
+  // Reproducibility — only emit fields the operator actually set.
+  bool has_repro = !s.repro_model_id.empty()
+                || !s.repro_model_hash.empty()
+                || !s.repro_prompt_version.empty()
+                || !s.repro_seed.empty()
+                || !s.repro_tag.empty();
+  if (has_repro) {
+    out += "  \"reproducibility\": {\n";
+    bool first_r = true;
+    auto emit_repro = [&](const char* k, const std::string& v) {
+      if (v.empty()) return;
+      if (!first_r) out += ",\n";
+      first_r = false;
+      out += "    \""; out += k; out += "\": ";
+      append_json_string(v, out);
+    };
+    emit_repro("model_id",       s.repro_model_id);
+    emit_repro("model_hash",     s.repro_model_hash);
+    emit_repro("prompt_version", s.repro_prompt_version);
+    emit_repro("seed",           s.repro_seed);
+    emit_repro("tag",            s.repro_tag);
+    out += "\n  },\n";
+  }
+
+  // Integrity — SHA-256 over the on-disk artifact files. With this in
+  // place, post-hoc edits to events.jsonl are detectable; audit chain
+  // continues to anchor the audit-specific record stream.
+  std::string events_hash = hash_file(events_path);
+  std::string audit_hash  = hash_file(audit_path);
+  std::string aupub_hash  = hash_file(audit_pub);
+  out += "  \"integrity\": {\n";
+  out += "    \"events_sha256\": \""        + events_hash + "\",\n";
+  out += "    \"audit_private_sha256\": \"" + audit_hash  + "\",\n";
+  out += "    \"audit_public_sha256\": \""  + aupub_hash  + "\",\n";
+  out += "    \"audit_chain_head\": \""     + (s.chain.head_hex.empty()
+                                               ? std::string(64, '0')
+                                               : s.chain.head_hex) + "\"\n";
+  out += "  },\n";
+
   out += "  \"files\": {\n";
   out += "    \"events.jsonl\":       {\"size_bytes\":" + std::to_string(evt_size) + ",\"lines\":" + std::to_string(evt_lines) + "},\n";
   out += "    \"audit.jsonl\":        {\"size_bytes\":" + std::to_string(aud_size) + ",\"lines\":" + std::to_string(aud_lines) + "},\n";

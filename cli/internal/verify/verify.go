@@ -145,7 +145,50 @@ func Run(runDir string) (*VerifyResult, int) {
 			m.AuditChain.Head, prev)
 		return res, 2
 	}
+
+	// Integrity check: events.jsonl + audit files match the hashes
+	// recorded at finalization. Catches post-hoc tampering of events.
+	// jsonl, which the chain alone doesn't anchor.
+	if m.Integrity != nil {
+		for _, fc := range []struct {
+			name, want string
+		}{
+			{"events.jsonl", m.Integrity.EventsSHA256},
+			{"audit.jsonl", m.Integrity.AuditPrivateSHA256},
+			{"audit.public.jsonl", m.Integrity.AuditPublicSHA256},
+		} {
+			if err := verifyFileHash(filepath.Join(runDir, fc.name), fc.want); err != nil {
+				res.Verified = false
+				res.BrokenReason = fc.name + ": " + err.Error()
+				return res, 2
+			}
+		}
+	}
 	return res, 0
+}
+
+// verifyFileHash re-hashes the file at path and compares to want.
+// An empty want means the manifest didn't record a hash for that file
+// (older runs pre-integrity) and is treated as a no-op success.
+func verifyFileHash(path, want string) error {
+	if want == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return fmt.Errorf("open: %w", err)
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("read: %w", err)
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if got != want {
+		return fmt.Errorf("hash mismatch (stored %s, computed %s)",
+			short(want), short(got))
+	}
+	return nil
 }
 
 // canonicalPayload extracts the bytes that were hashed at write time,
