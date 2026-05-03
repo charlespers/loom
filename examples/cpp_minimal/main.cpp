@@ -4,6 +4,16 @@
 // resulting events.jsonl + summary.md show what a useful run looks like.
 // Compiled as `cpp_minimal` and exercised by tools/smoke.sh and the
 // loom_demo.sh script.
+//
+// NOTE — this is a UI fixture, not a benchmark. The "layer" durations
+// are produced by `std::this_thread::sleep_for`, and the
+// `tok_step_ms` metric value is hardcoded (`8.71 + 0.05 * step`), not
+// derived from any real measurement. Numbers shown by `loom show
+// latest` after running this binary are real measurements *of
+// sleep_for*, useful for verifying the timing pipeline end-to-end.
+// They are not representative of inference throughput; the
+// inference-runtime perf budget lives in `docs/design/...` § 9 and
+// is M5 territory.
 #include <loom/loom.h>
 
 #include <chrono>

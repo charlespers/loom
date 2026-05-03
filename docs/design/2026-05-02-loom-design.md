@@ -574,8 +574,11 @@ breaking change.
 
 ## 9. Performance budget
 
-These targets are pinned in microbenchmarks under `embed/bench/`. CI fails if
-any tier-A runner (defined in § 18) regresses past these thresholds.
+These are M5 design targets — what the ring-buffer + daemon path is
+intended to deliver. **As of M3.5 they are not measured**; the
+microbenchmark harness (`embed/bench/`) and the CI gate that pins them
+on tier-A runners are M5 deliverables. The current `fwrite + fflush`
+path (M2) is explicitly off this budget and the README discloses that.
 
 | Event type             | Hot-path cost (target) | Path |
 |---|---|---|
@@ -585,6 +588,21 @@ any tier-A runner (defined in § 18) regresses past these thresholds.
 | `audit` (default sync) | < 5 ms p99 | event → ring → daemon → write + fsync → ack |
 | `audit` (async opt-in) | < 500 ns | same as span but with hash-chain header |
 | `lifecycle`            | irrelevant | infrequent |
+
+### 9.1. Percentile and sampling algorithm (M2 / M3.5)
+
+Span percentiles in `manifest.json` and `loom show` are computed
+nearest-rank: `idx = floor(pct/100 * (n-1))`, no interpolation. With
+small `n` this means p50 == p99 trivially (e.g. n=2 → p50=samples[0],
+p99=samples[1]); the report does not currently warn on tiny samples.
+
+Per-span samples are stored in a fixed-size buffer of `kMaxSpanSamples
+= 4096` entries (`embed/src/state.h`). After the cap is hit, additional
+samples for that span name are dropped from the percentile calculation
+(FIFO truncation; the running `count` and `total_ns` continue to
+include them, but percentiles are computed from the first 4096
+samples). For Bedrock decode loops this will trigger; switching to
+Algorithm-R reservoir sampling is a tracked follow-up.
 
 Backpressure: ring overflow spills to a sequentially numbered file in the same
 dir. Spill activity emits a `metric` (`loom_ring_spill_bytes`) so the TUI
