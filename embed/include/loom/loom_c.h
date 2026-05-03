@@ -45,6 +45,18 @@ void     loom_span_end  (uint64_t handle);
 void     loom_span_annotate(uint64_t handle,
                             const uint8_t* attrs, size_t attrs_len);
 
+// Emit a span with an externally-supplied duration. For work whose
+// real cost cannot be measured by RAII bracketing — most importantly,
+// CUDA kernels whose `<<<...>>>` launch returns long before the GPU
+// actually executes them. Producers record `cudaEvent_t` markers
+// around the launch, drain them at a later sync point via
+// `cudaEventElapsedTime`, and call this with the resulting nanoseconds.
+// Records land in the same per-name span_stats table as RAII spans,
+// so percentile output mixes both freely.
+void     loom_span_emit (const char* name, size_t name_len,
+                         uint64_t dur_ns,
+                         const uint8_t* attrs, size_t attrs_len);
+
 // ── Metrics ─────────────────────────────────────────────────────────────
 // Every metric carries a value AND optional attributes. value is emitted
 // directly into the JSON event; attrs are decoded and merged.

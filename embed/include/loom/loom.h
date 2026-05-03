@@ -140,6 +140,20 @@ class Span {
   uint64_t handle_ = 0;
 };
 
+// Emit a span with an externally-supplied duration. For work whose
+// real cost cannot be measured by RAII bracketing — most importantly
+// CUDA kernels whose `<<<...>>>` launch returns long before the GPU
+// actually executes them. Pair with cudaEvent_t markers and call this
+// at a deferred drain after `cudaEventElapsedTime`.
+inline void span_emit(std::string_view name, uint64_t dur_ns) noexcept {
+  loom_span_emit(name.data(), name.size(), dur_ns, nullptr, 0);
+}
+inline void span_emit(std::string_view name, uint64_t dur_ns,
+                      std::initializer_list<Attr> attrs) noexcept {
+  auto b = detail::encode(attrs);
+  loom_span_emit(name.data(), name.size(), dur_ns, b.bytes, b.len);
+}
+
 // ── Metrics ───────────────────────────────────────────────────────────────
 inline void metric_i64(std::string_view name, int64_t value,
                        std::initializer_list<Attr> attrs = {}) noexcept {

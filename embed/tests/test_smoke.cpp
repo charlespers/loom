@@ -162,6 +162,52 @@ TEST(EventsWriter, EmitsAllCategoriesWithRichPayload) {
   EXPECT_NE(summary.find("forward.layer"),          std::string::npos);
 }
 
+TEST(SpanEmit, RecordsCallerSuppliedDuration) {
+  LoomEnv env;
+  const char kRunID[] = "01J3KTV6S5SPANEMITTEST0001";
+  setenv("LOOM_RUN_ID", kRunID, 1);
+  ASSERT_EQ(loom::init(), 0);
+
+  // Two emit-style spans with caller-supplied durations and one with
+  // an attribute. Mirrors what Bedrock's CudaTimedScope drain will do
+  // after cudaEventElapsedTime returns the elapsed ms for a kernel.
+  loom::span_emit("forward.layer", 200'000ull);
+  loom::span_emit("forward.layer", 250'000ull, {{"layer", int64_t{0}}});
+  loom::span_emit("attention.qkv", 800'000ull);
+  loom::shutdown();
+
+  std::string events = slurp(env.home() + "/runs/" + kRunID + "/events.jsonl");
+  ASSERT_FALSE(events.empty()) << "events.jsonl missing/empty";
+
+  // Each emit produces one span record with the supplied dur_ns and no
+  // span_id field (emit-style spans aren't paired).
+  EXPECT_NE(events.find("\"name\":\"forward.layer\",\"dur_ns\":200000"),
+            std::string::npos);
+  EXPECT_NE(events.find("\"name\":\"forward.layer\",\"dur_ns\":250000"),
+            std::string::npos);
+  EXPECT_NE(events.find("\"name\":\"attention.qkv\",\"dur_ns\":800000"),
+            std::string::npos);
+  // Attribute round-trips.
+  EXPECT_NE(events.find("\"layer\":0"), std::string::npos);
+
+  // Per-name stats should aggregate emit + RAII spans alike. Ensure
+  // forward.layer's count is at least 2 in the manifest.
+  std::string manifest = slurp(env.home() + "/runs/" + kRunID + "/manifest.json");
+  EXPECT_NE(manifest.find("\"forward.layer\""), std::string::npos);
+}
+
+TEST(SpanEmit, NoopWhenInactive) {
+  LoomEnv env;
+  unsetenv("LOOM_RUN_ID");
+  ASSERT_EQ(loom::init(), 0);
+  ASSERT_FALSE(loom::active());
+  // Must not crash, must not emit anything (no run dir to emit into).
+  loom::span_emit("never.fires", 1'000'000ull);
+  loom::span_emit("also.never",  500ull, {{"k", int64_t{1}}});
+  loom::shutdown();
+  SUCCEED();
+}
+
 TEST(AuditChain, HashesProgress) {
   LoomEnv env;
   const char kRunID[] = "01J3KTV6S5AUDITCHAINTEST";

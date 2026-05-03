@@ -47,6 +47,11 @@ void loom_hook_span_end(const char* /*name*/) {
   if (h != 0) loom_span_end(h);
 }
 
+void loom_hook_span_emit(const char* name, uint64_t dur_ns) {
+  if (!name) return;
+  loom_span_emit(name, std::strlen(name), dur_ns, nullptr, 0);
+}
+
 void loom_hook_metric_f64(const char* name, double v) {
   if (!name) return;
   loom_metric_f64(name, std::strlen(name), v, nullptr, 0);

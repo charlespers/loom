@@ -22,6 +22,8 @@
 extern "C" {
 #endif
 
+#include <stdint.h>
+
 #if defined(__GNUC__) || defined(__clang__)
   #define LOOM_WEAK __attribute__((weak))
 #else
@@ -30,6 +32,14 @@ extern "C" {
 
 LOOM_WEAK void loom_hook_span_begin(const char* name);
 LOOM_WEAK void loom_hook_span_end  (const char* name);
+
+// loom_hook_span_emit — emit a span with caller-supplied duration in
+// nanoseconds. For CUDA kernels: record cudaEvent_t markers around
+// the launch, drain at a sync point via cudaEventElapsedTime, and
+// LOOM_HOOK(loom_hook_span_emit, name, ns) the result. Records mix
+// freely with RAII spans in the manifest's percentile table.
+LOOM_WEAK void loom_hook_span_emit (const char* name, uint64_t dur_ns);
+
 LOOM_WEAK void loom_hook_metric_f64(const char* name, double v);
 LOOM_WEAK void loom_hook_error     (const char* name, const char* message);
 LOOM_WEAK void loom_hook_audit     (const char* name,

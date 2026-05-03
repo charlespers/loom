@@ -429,6 +429,56 @@ extern "C" void loom_span_annotate(uint64_t handle,
   append_attrs_json(attrs, attrs_len, it->second.attrs_json);
 }
 
+extern "C" void loom_span_emit(const char* name, size_t name_len,
+                                uint64_t dur_ns,
+                                const uint8_t* attrs, size_t attrs_len) {
+  using namespace loom::detail;
+  State& s = state();
+  if (!s.active.load(std::memory_order_acquire)) return;
+  if (!name || name_len == 0) return;
+
+  std::string attrs_json;
+  if (attrs && attrs_len) append_attrs_json(attrs, attrs_len, attrs_json);
+  std::string name_str(name, name_len);
+
+  // Update per-name span_stats so the manifest's percentile table and
+  // the run summary's top-spans block reflect these caller-provided
+  // durations alongside RAII spans. Same code path as loom_span_end.
+  {
+    std::lock_guard<std::mutex> lk(s.span_stats_mutex);
+    auto& st = s.span_stats[name_str];
+    st.count++;
+    st.total_ns += dur_ns;
+    if (dur_ns < st.min_ns) st.min_ns = dur_ns;
+    if (dur_ns > st.max_ns) st.max_ns = dur_ns;
+    if (st.samples.size() < kMaxSpanSamples) st.samples.push_back(dur_ns);
+  }
+  s.count_span.fetch_add(1, std::memory_order_relaxed);
+
+  uint64_t seq    = s.seq.fetch_add(1, std::memory_order_relaxed);
+  uint64_t now_ns = now_unix_ns();
+
+  // No span_id / parent — emit-style spans aren't paired and don't
+  // participate in the per-thread parent stack. They are async-arrival
+  // records by construction (the original work happened on a CUDA
+  // stream / a different thread / a deferred drain).
+  std::string body;
+  body.reserve(64 + name_len + attrs_json.size());
+  body += ",\"name\":";
+  append_json_string(name_str.data(), name_str.size(), body);
+  body += ",\"dur_ns\":";
+  body += std::to_string(dur_ns);
+  if (!attrs_json.empty()) {
+    body += ",\"attrs\":{";
+    body += attrs_json;
+    body.push_back('}');
+  } else {
+    body += ",\"attrs\":{}";
+  }
+
+  write_event("span", seq, now_ns, body);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Public C ABI — Metrics
 // ─────────────────────────────────────────────────────────────────────────
