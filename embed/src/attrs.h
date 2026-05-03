@@ -24,6 +24,14 @@ constexpr uint32_t kAttrsMagic = 0xA77A1234u;
 // number of attributes actually decoded.
 size_t append_attrs_json(const uint8_t* buf, size_t len, std::string& out);
 
+// Like append_attrs_json, but emits only keys whose name ends in the
+// "@public" suffix, with the suffix stripped. This is the redaction
+// rule used by audit.public.jsonl: producers tag fields that are safe
+// to share by suffixing the key name. A field both `path` and
+// `path@public` may be present in the same call — `path` stays only
+// in the private file, `path@public` becomes `path` in the public.
+size_t append_attrs_json_public(const uint8_t* buf, size_t len, std::string& out);
+
 // JSON-escape a string into `out`. Safe for arbitrary UTF-8.
 void append_json_string(const char* s, size_t n, std::string& out);
 void append_json_string(const std::string& s, std::string& out);

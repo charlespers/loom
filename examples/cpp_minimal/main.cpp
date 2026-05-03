@@ -18,9 +18,16 @@ int main() {
 
   // Audit the input the model will see — the kind of thing a compliance
   // operator wants pinned in audit.jsonl. Sync mode by default.
+  //
+  // Field-level disclosure: keys ending in "@public" are kept in
+  // audit.public.jsonl (with the suffix stripped); other keys stay
+  // private. So an external auditor sees the file size + a hash of
+  // the path, but not the path itself. This is the spec § 4.3
+  // redaction convention; nothing else needs to be configured.
   loom::audit("file.read", {
-      {"path",  std::string_view("/Users/example/notes.md")},
-      {"bytes", int64_t{12384}},
+      {"path",             std::string_view("/Users/example/notes.md")},
+      {"bytes@public",     int64_t{12384}},
+      {"path_hash@public", std::string_view("sha256:9f2c…")},
   });
 
   loom::lifecycle("decode.start");
@@ -51,10 +58,12 @@ int main() {
               loom::Severity::Warn,
               {{"step", int64_t{1}}});
 
-  // Final audit closing the run with an output hash.
+  // Final audit closing the run with an output hash. Both fields are
+  // marked @public — the external auditor wants to see deterministic
+  // output identity and how many tokens we generated.
   loom::audit("run.finished", {
-      {"output_hash", std::string_view("a1b2c3d4")},
-      {"tokens",      int64_t{2}},
+      {"output_hash@public", std::string_view("a1b2c3d4")},
+      {"tokens@public",      int64_t{2}},
   });
 
   loom::shutdown();
