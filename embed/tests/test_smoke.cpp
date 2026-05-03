@@ -88,7 +88,10 @@ TEST(EventsWriter, EmitsAllCategoriesWithRichPayload) {
 
   { loom::Span s("forward.layer", {{"layer", 8}, {"variant", "qkv_tri"}}); }
   loom::metric_f64("tok_per_s", 111.5, {{"step", 0}});
-  loom::audit("file.read", {{"path", std::string_view("/x")}});
+  loom::audit("file.read", {
+      {"path",         std::string_view("/x")},
+      {"bytes@public", int64_t{42}},
+  });
   loom::lifecycle("custom.marker");
   loom::error("cuda.fail", "kernel launch failed", loom::Severity::Error);
   loom::shutdown();
@@ -136,10 +139,16 @@ TEST(EventsWriter, EmitsAllCategoriesWithRichPayload) {
   EXPECT_NE(audit.find("\"this\":"),  std::string::npos);
   EXPECT_NE(audit.find("\"path\":\"/x\""), std::string::npos);
 
-  // audit.public.jsonl carries the chain but no path.
-  EXPECT_NE(pub.find("\"chain\":"), std::string::npos);
-  EXPECT_EQ(pub.find("\"path\":"),  std::string::npos)
-      << "public file leaked private attrs: " << pub;
+  // audit.public.jsonl carries the chain. The "@public" key gets the
+  // suffix stripped on the way out; the unsuffixed "path" key stays
+  // private.
+  EXPECT_NE(pub.find("\"chain\":"),    std::string::npos);
+  EXPECT_NE(pub.find("\"bytes\":42"),  std::string::npos)
+      << "public file should expose bytes@public as plain bytes: " << pub;
+  EXPECT_EQ(pub.find("\"path\":"),     std::string::npos)
+      << "public file leaked the private path key: " << pub;
+  EXPECT_EQ(pub.find("@public"),       std::string::npos)
+      << "public file should not carry @public suffixes: " << pub;
 
   // manifest.json self-describing.
   EXPECT_NE(mani.find("\"schema\": \"loom.manifest.v1\""), std::string::npos);

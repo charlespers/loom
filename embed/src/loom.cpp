@@ -552,12 +552,15 @@ extern "C" void loom_audit(const char* name, size_t name_len,
   private_line += this_hex;
   private_line += "\"}}\n";
 
-  // Public record: same structure but attrs are stripped to {}.
-  // Same chain — auditors rehash by reconstructing canonical from public
-  // metadata only when they don't have the private file; verifier walks
-  // private if available.
+  // Public record: structural fields verbatim; attrs filtered to only
+  // those keys ending in "@public" (suffix stripped on the way out).
+  // The chain is shared — verifiers rehash the private record.
+  std::string public_attrs_json;
+  if (attrs && attrs_len) {
+    append_attrs_json_public(attrs, attrs_len, public_attrs_json);
+  }
   std::string public_canonical;
-  public_canonical.reserve(96 + name_len);
+  public_canonical.reserve(96 + name_len + public_attrs_json.size());
   public_canonical += "\"v\":\"";
   public_canonical += LOOM_WIRE_SCHEMA;
   public_canonical += "\",\"cat\":\"audit\",\"seq\":";
@@ -566,7 +569,13 @@ extern "C" void loom_audit(const char* name, size_t name_len,
   public_canonical += ts;
   public_canonical += "\",\"name\":";
   append_json_string(name, name_len, public_canonical);
-  public_canonical += ",\"attrs\":{}";
+  if (!public_attrs_json.empty()) {
+    public_canonical += ",\"attrs\":{";
+    public_canonical += public_attrs_json;
+    public_canonical.push_back('}');
+  } else {
+    public_canonical += ",\"attrs\":{}";
+  }
 
   std::string public_line;
   public_line.reserve(public_canonical.size() + 160);

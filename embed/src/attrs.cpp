@@ -204,6 +204,92 @@ void append_base64(const uint8_t* data, size_t n, std::string& out) {
 }
 }  // namespace
 
+// kPublicSuffix marks a key as safe to include in audit.public.jsonl.
+// Encoders write `"path@public"` to mean "the path field is public";
+// the decoder strips the suffix and emits the value with key `"path"`.
+constexpr const char  kPublicSuffix[]  = "@public";
+constexpr const size_t kPublicSuffixN  = sizeof(kPublicSuffix) - 1;
+
+namespace {
+// Decode the next attribute value into `out`, advancing `off`. Returns
+// false if the buffer is truncated or the tag is unknown.
+bool decode_value(const uint8_t* buf, size_t len, size_t& off,
+                  uint8_t tag, std::string& out) {
+  switch (tag) {
+    case TAG_I64: {
+      if (off + 8 > len) return false;
+      int64_t v = get_i64_le(buf + off); off += 8;
+      char tmp[32];
+      std::snprintf(tmp, sizeof(tmp), "%lld", static_cast<long long>(v));
+      out += tmp;
+      return true;
+    }
+    case TAG_F64: {
+      if (off + 8 > len) return false;
+      double v = get_f64_le(buf + off); off += 8;
+      char tmp[32];
+      // %.10g matches bedrock.bench.v1 so existing parsers work unmodified.
+      std::snprintf(tmp, sizeof(tmp), "%.10g", v);
+      out += tmp;
+      return true;
+    }
+    case TAG_STR: {
+      if (off + 4 > len) return false;
+      uint32_t val_len = get_u32_le(buf + off); off += 4;
+      if (off + val_len > len) return false;
+      loom::detail::append_json_string(
+          reinterpret_cast<const char*>(buf + off), val_len, out);
+      off += val_len;
+      return true;
+    }
+    case TAG_BOOL: {
+      if (off + 1 > len) return false;
+      uint8_t v = buf[off++];
+      out += (v ? "true" : "false");
+      return true;
+    }
+    case TAG_BYTES: {
+      if (off + 4 > len) return false;
+      uint32_t val_len = get_u32_le(buf + off); off += 4;
+      if (off + val_len > len) return false;
+      out.push_back('"');
+      append_base64(buf + off, val_len, out);
+      out.push_back('"');
+      off += val_len;
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+// Skip the next value in the buffer without decoding. Returns false on
+// truncation; on success, advances `off` past the value's payload.
+bool skip_value(const uint8_t* buf, size_t len, size_t& off, uint8_t tag) {
+  switch (tag) {
+    case TAG_I64:
+    case TAG_F64:
+      if (off + 8 > len) return false;
+      off += 8;
+      return true;
+    case TAG_STR:
+    case TAG_BYTES: {
+      if (off + 4 > len) return false;
+      uint32_t val_len = get_u32_le(buf + off); off += 4;
+      if (off + val_len > len) return false;
+      off += val_len;
+      return true;
+    }
+    case TAG_BOOL:
+      if (off + 1 > len) return false;
+      off += 1;
+      return true;
+    default:
+      return false;
+  }
+}
+}  // namespace
+
 size_t append_attrs_json(const uint8_t* buf, size_t len, std::string& out) {
   if (buf == nullptr || len < 8) return 0;
   if (get_u32_le(buf) != kAttrsMagic) return 0;
@@ -211,7 +297,7 @@ size_t append_attrs_json(const uint8_t* buf, size_t len, std::string& out) {
   size_t off = 8;
   size_t emitted = 0;
   for (uint32_t i = 0; i < count; i++) {
-    if (off + 3 > len) break;  // need at least key_len + tag
+    if (off + 3 > len) break;
     uint16_t key_len = get_u16_le(buf + off); off += 2;
     if (off + key_len + 1 > len) break;
     const char* key = reinterpret_cast<const char*>(buf + off);
@@ -222,55 +308,41 @@ size_t append_attrs_json(const uint8_t* buf, size_t len, std::string& out) {
     append_json_string(key, key_len, out);
     out.push_back(':');
 
-    switch (tag) {
-      case TAG_I64: {
-        if (off + 8 > len) return emitted;
-        int64_t v = get_i64_le(buf + off); off += 8;
-        char tmp[32];
-        std::snprintf(tmp, sizeof(tmp), "%lld", static_cast<long long>(v));
-        out += tmp;
-        break;
-      }
-      case TAG_F64: {
-        if (off + 8 > len) return emitted;
-        double v = get_f64_le(buf + off); off += 8;
-        char tmp[32];
-        // %.10g matches the convention pinned across the project, including
-        // bedrock.bench.v1, so JSON parsers that already accept it work
-        // unmodified.
-        std::snprintf(tmp, sizeof(tmp), "%.10g", v);
-        out += tmp;
-        break;
-      }
-      case TAG_STR: {
-        if (off + 4 > len) return emitted;
-        uint32_t val_len = get_u32_le(buf + off); off += 4;
-        if (off + val_len > len) return emitted;
-        append_json_string(reinterpret_cast<const char*>(buf + off),
-                           val_len, out);
-        off += val_len;
-        break;
-      }
-      case TAG_BOOL: {
-        if (off + 1 > len) return emitted;
-        uint8_t v = buf[off++];
-        out += (v ? "true" : "false");
-        break;
-      }
-      case TAG_BYTES: {
-        if (off + 4 > len) return emitted;
-        uint32_t val_len = get_u32_le(buf + off); off += 4;
-        if (off + val_len > len) return emitted;
-        out.push_back('"');
-        append_base64(buf + off, val_len, out);
-        out.push_back('"');
-        off += val_len;
-        break;
-      }
-      default:
-        // Unknown tag — abort decoding.
-        return emitted;
+    if (!decode_value(buf, len, off, tag, out)) return emitted;
+    emitted++;
+  }
+  return emitted;
+}
+
+size_t append_attrs_json_public(const uint8_t* buf, size_t len, std::string& out) {
+  if (buf == nullptr || len < 8) return 0;
+  if (get_u32_le(buf) != kAttrsMagic) return 0;
+  uint32_t count = get_u32_le(buf + 4);
+  size_t off = 8;
+  size_t emitted = 0;
+  for (uint32_t i = 0; i < count; i++) {
+    if (off + 3 > len) break;
+    uint16_t key_len = get_u16_le(buf + off); off += 2;
+    if (off + key_len + 1 > len) break;
+    const char* key = reinterpret_cast<const char*>(buf + off);
+    off += key_len;
+    uint8_t tag = buf[off++];
+
+    // Include only @public-suffixed keys; strip the suffix on the way out.
+    bool is_public =
+        key_len >= kPublicSuffixN &&
+        std::memcmp(key + (key_len - kPublicSuffixN),
+                    kPublicSuffix, kPublicSuffixN) == 0;
+
+    if (!is_public) {
+      if (!skip_value(buf, len, off, tag)) return emitted;
+      continue;
     }
+
+    if (emitted > 0) out.push_back(',');
+    append_json_string(key, key_len - kPublicSuffixN, out);
+    out.push_back(':');
+    if (!decode_value(buf, len, off, tag, out)) return emitted;
     emitted++;
   }
   return emitted;
