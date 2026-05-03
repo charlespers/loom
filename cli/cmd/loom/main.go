@@ -7,6 +7,8 @@
 //   loom run -- ...   launch a command under the harness
 //   loom verify <id>  walk the audit hash chain
 //   loom report <id>  render report.html
+//   loom export <id>  bundle the run as a signed tar.gz for auditors
+//   loom keygen       generate an Ed25519 signing keypair
 //   loom version      version + wire schema
 package main
 
@@ -15,6 +17,7 @@ import (
 	"os"
 
 	"github.com/charlespers/loom/cli/internal/doctor"
+	"github.com/charlespers/loom/cli/internal/export"
 	"github.com/charlespers/loom/cli/internal/ls"
 	"github.com/charlespers/loom/cli/internal/report"
 	"github.com/charlespers/loom/cli/internal/run"
@@ -48,6 +51,8 @@ func main() {
 	root.AddCommand(show.Cmd())
 	root.AddCommand(verify.Cmd())
 	root.AddCommand(report.Cmd())
+	root.AddCommand(export.Cmd())
+	root.AddCommand(export.KeygenCmd())
 
 	root.AddCommand(&cobra.Command{
 		Use:   "version",

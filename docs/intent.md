@@ -8,21 +8,47 @@ surface area.
 
 ## The core thesis
 
-The frontier-cloud-AI status quo (OpenAI / Anthropic subscriptions,
-remote tool-use, server-side logs) does not survive contact with three
-real constraints:
+Loom exists because regulators are now writing the spec. EU AI Act
+**Article 12** — enforceable on high-risk systems Aug 2 2026 unless
+the Digital Omnibus deferral lands first — requires that any high-risk
+AI system "shall technically allow for the automatic recording of
+events (logs) over the lifetime of the system." Manual logging does
+not satisfy the rule. Logs must be retained at least six months and
+must support post-market monitoring under Article 72.
 
-1. **Subscription economics**: consumer-tier subscriptions on hosted
-   models lose money and will tighten under rate limits. Small businesses
-   already feel this; the long tail of personal AI moves on-device.
-2. **Compliance gravity**: any business under HIPAA, GLBA, MiFID, GDPR,
-   FERPA, attorney-client privilege, or a Data Use Agreement can't send
-   the inputs the model needs to a third party. The model lives where
-   the data already does.
-3. **Agent-on-files reality**: the most useful AI work — agents reading
-   the user's filesystem, drafting on their behalf, writing back —
-   demands an audit trail the user *owns*, not one streamed to a vendor
-   they can't subpoena.
+That paragraph is the product spec for an entire category, and it does
+not describe what existing LLM observability tools produce.
+
+Loom delivers the per-run artifact layer of that spec — every
+inference produces a verifiable record. Retention, cross-run
+aggregation, and Article 72 post-market reporting are operator policy
+layered on top of those records; Loom captures the artifact and
+authenticates it, the deployment owns the lifecycle.
+
+Around that mandate, three forces converge:
+
+1. **Compliance gravity.** Article 12 is the headline. Around it: the
+   Jan 2025 HIPAA Security Rule rewrite naming AI software in mandatory
+   technology asset inventory; ABA Formal Opinion 512 (Jul 2024)
+   treating consumer LLMs as third-party disclosure that can waive
+   attorney-client privilege; ISO/IEC 42001 (Dec 2023) certifiable
+   today; NIST AI RMF crosswalks; SOX, MiFID, FERPA, GLBA, GDPR. None
+   of these can be satisfied by sending the model's inputs to a third
+   party.
+2. **Capability shift to open weights.** Llama 3.1 405B reaches ~87.3%
+   MMLU vs GPT-4 Turbo's ~86.5%; Llama crossed 1.2B downloads in Apr
+   2025; >50% of the Fortune 500 was piloting it as of Mar 2025.
+   Concrete deployments are real: JPMorgan's LLM Suite (200K
+   employees), Goldman's GS AI Assistant, the DoD's GenAI.mil at IL5
+   (3M+ personnel; expanded to IL6/IL7 May 2026), Apple Private Cloud
+   Compute. The model lives where the data already does because the
+   operator can now afford to host it.
+3. **Agent-on-files reality.** The most useful AI work — agents
+   reading the user's filesystem, drafting on their behalf, writing
+   back — demands an audit trail the user *owns*. Not one streamed to
+   a vendor they can't subpoena, not a Prometheus dashboard, not
+   OpenTelemetry spans. A record the operator can hand to opposing
+   counsel under Federal Rules of Evidence 901/902.
 
 Local AI is operationally different from cloud AI. There is no SRE
 backend to query when something fails, no shared S3 bucket of run logs
@@ -31,6 +57,16 @@ regulator wants to know exactly which inputs produced a flagged output.
 The local machine itself has to become the system of record.
 
 Loom is what makes that possible.
+
+> Cost is *not* the wedge. Hosted token prices have fallen ~280× since
+> Nov 2022 ([Epoch AI][epoch]), and hyperscaler "private LLM" services
+> (AWS Bedrock with BAA, Azure OpenAI with Private Link) have HIPAA
+> coverage and FedRAMP. The on-prem-or-die argument is sovereignty +
+> auditability — a BAA shifts liability but leaves the cloud inside
+> the trust boundary; in-process tamper-evident logs do not. See
+> [`market-thesis.md`](market-thesis.md) for the full backing.
+
+[epoch]: https://epoch.ai/data-insights/llm-inference-price-trends
 
 ## Use cases driving the design
 
@@ -128,6 +164,37 @@ loop.
 | Long-term readability | NDJSON event stream, plain Markdown summary, single-file HTML report — opens with anything |
 | No network egress | Zero network calls anywhere; inline-data HTML report; in-browser SHA-256 verifier |
 | Operator UX | `loom`, `loom ls`, `loom show`, `loom verify`, `loom report` — typographic terminal output, restrained color, one accent per category |
+| Auditor handoff | `loom export <run> --key <ed25519>` produces signed tar.gz; `loom verify --pubkey` re-checks every file's hash and the Ed25519 signature on the digest manifest. Without the operator's private key, an attacker who modifies the bundle cannot produce a valid signature even by rewriting every artifact coherently |
+| Provenance enforcement | `LOOM_STRICT_REPRO=1` refuses to init a run whose `LOOM_MODEL_ID` / `LOOM_MODEL_HASH` / `LOOM_PROMPT_VERSION` are unset — defaults on for `loom export` workflows |
+
+## What existing tools don't give you
+
+Every funded LLM-observability product today assumes the model lives
+behind an HTTP boundary you control. **LangSmith** wraps your code via
+SDK and ships traces upstream; self-host is Enterprise-only.
+**Helicone** is a proxy that sits between your code and the LLM
+provider — fundamentally an API-gateway pattern. **Langfuse** is a
+Postgres + ClickHouse SDK integration. **Arize Phoenix** runs locally
+but emits OpenTelemetry spans, not compliance artifacts. **WhyLabs**,
+**Galileo**, **Maxim**, **Braintrust** all sit somewhere on this same
+spectrum. None ship hash-chained, tamper-evident records as a default.
+None capture the reproducibility metadata (weights hash, runtime
+build, kernel/sm version, seed, sampling state) you need to defend a
+discovery request.
+
+Operational tools (vLLM, llama.cpp, Ollama, TGI) export Prometheus
+metrics — KV-cache occupancy, latencies, throughput. SRE artifacts,
+not OCR or court artifacts. Ollama runs without telemetry by default,
+which is good for air-gap but means there is *no record at all*
+unless you build one.
+
+Hyperscaler "private LLM" wrappers (AWS Bedrock with BAA, Azure
+OpenAI with Private Link) give you data residency and a contractual
+liability shift. They do not give you Article 12's "automatic
+recording over the lifetime of the system" produced *inside the
+operator's process*; the cloud is still in the trust boundary.
+
+Loom produces the record.
 
 ## What loom is NOT
 
@@ -135,10 +202,18 @@ loop.
 - Loom is not a model serving framework. It instruments yours.
 - Loom is not OpenTelemetry. It interoperates with neither
   collectors nor any vendor's wire protocol.
+- Loom is not a hyperscaler "private LLM" wrapper. Bedrock-in-VPC
+  shifts liability via BAA; Loom shifts the *record* into the
+  operator's process so the cloud is no longer in the trust boundary.
 - Loom is not an event-stream compactor. Long-running processes that
   generate millions of events should batch upstream of the audit hooks
   or down-sample spans; the storage model is one event per line, not a
   TSDB.
+- Loom is not a retention or lifecycle manager. Run directories
+  persist until the operator deletes them; satisfying the EU AI Act's
+  six-month retention or HIPAA's six-year retention is operator policy
+  (a `find ~/.loom/runs -mtime +N` cron is sufficient). Loom captures
+  and authenticates each record; retention is on the deployment.
 
 These exclusions keep Loom honest about what it is: a designed
 single-host harness that turns "the AI ran on my computer" into "the AI
