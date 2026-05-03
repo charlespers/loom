@@ -27,7 +27,7 @@ void loom_hook_span_end(const char* /*name*/) {
 
 void loom_hook_metric_f64(const char* name, double v) {
   if (!name) return;
-  loom_metric_f64(name, std::strlen(name), v);
+  loom_metric_f64(name, std::strlen(name), v, nullptr, 0);
 }
 
 void loom_hook_error(const char* name, const char* message) {
