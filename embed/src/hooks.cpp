@@ -52,6 +52,17 @@ void loom_hook_span_emit(const char* name, uint64_t dur_ns) {
   loom_span_emit(name, std::strlen(name), dur_ns, nullptr, 0);
 }
 
+void loom_hook_device_span_emit(const char* name, uint64_t dur_ns,
+                                const char* backend, const char* queue_id) {
+  if (!name) return;
+  loom_device_span_emit(
+      name,     std::strlen(name),
+      dur_ns,
+      backend  ? backend  : "", backend  ? std::strlen(backend)  : 0,
+      queue_id ? queue_id : "", queue_id ? std::strlen(queue_id) : 0,
+      nullptr, 0);
+}
+
 void loom_hook_metric_f64(const char* name, double v) {
   if (!name) return;
   loom_metric_f64(name, std::strlen(name), v, nullptr, 0);

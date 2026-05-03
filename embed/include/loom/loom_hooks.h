@@ -40,6 +40,16 @@ LOOM_WEAK void loom_hook_span_end  (const char* name);
 // freely with RAII spans in the manifest's percentile table.
 LOOM_WEAK void loom_hook_span_emit (const char* name, uint64_t dur_ns);
 
+// loom_hook_device_span_emit — same shape, but lands as cat="device_span"
+// with backend + queue_id propagated into the event's attrs. Use this
+// when the duration was measured on an asynchronous accelerator
+// (GPU/NPU/DSP) so `loom show` can distinguish device-execution time
+// from CPU-side dispatch / RAII span time for the same span name.
+LOOM_WEAK void loom_hook_device_span_emit(const char* name,
+                                          uint64_t    dur_ns,
+                                          const char* backend,
+                                          const char* queue_id);
+
 LOOM_WEAK void loom_hook_metric_f64(const char* name, double v);
 LOOM_WEAK void loom_hook_error     (const char* name, const char* message);
 LOOM_WEAK void loom_hook_audit     (const char* name,

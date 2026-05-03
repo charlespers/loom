@@ -99,6 +99,7 @@ struct State {
   std::atomic<uint64_t> seq{0};
   std::atomic<uint64_t> next_span_id{1};
   std::atomic<uint64_t> count_span{0};
+  std::atomic<uint64_t> count_device_span{0};
   std::atomic<uint64_t> count_metric{0};
   std::atomic<uint64_t> count_audit{0};
   std::atomic<uint64_t> count_lifecycle{0};
@@ -109,8 +110,13 @@ struct State {
   std::unordered_map<uint64_t, SpanRecord> active_spans;
 
   // ── Per-name span stats for summary.md and manifest.json ─────────────
+  // Two parallel tables: CPU spans (cat="span", measured by RAII or
+  // explicit loom_span_emit) and device spans (cat="device_span",
+  // host-resolved from cudaEvent / equivalent). Same lock covers both
+  // since the pairs of events that update them are independent.
   std::mutex span_stats_mutex;
   std::unordered_map<std::string, SpanStats> span_stats;
+  std::unordered_map<std::string, SpanStats> device_span_stats;
 
   // ── Errors & lifecycle, kept in memory for summary.md ────────────────
   std::mutex errors_mutex;

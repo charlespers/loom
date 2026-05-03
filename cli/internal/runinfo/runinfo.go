@@ -115,6 +115,7 @@ type Manifest struct {
 	Host             json.RawMessage         `json:"host"`
 	Counts           ManifestCounts          `json:"counts"`
 	Spans            json.RawMessage         `json:"spans"`
+	DeviceSpans      json.RawMessage         `json:"device_spans,omitempty"`
 	AuditChain       ManifestAuditChain      `json:"audit_chain"`
 	Files            json.RawMessage         `json:"files"`
 	Reproducibility  *Reproducibility        `json:"reproducibility,omitempty"`

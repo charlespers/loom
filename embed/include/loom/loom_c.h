@@ -57,6 +57,26 @@ void     loom_span_emit (const char* name, size_t name_len,
                          uint64_t dur_ns,
                          const uint8_t* attrs, size_t attrs_len);
 
+// Emit a device-side span — work whose duration was measured on an
+// asynchronous accelerator (GPU/NPU/DSP) by primitives like
+// cudaEvent_t, hipEvent_t, or MTLCommandBuffer completion handlers.
+// Distinct from loom_span_emit in that records carry cat="device_span"
+// and per-name stats accumulate in a parallel device_span_stats
+// table — so `loom show` can surface CPU and device timing for the
+// same logical span name as separate rows.
+//
+// `backend` and `queue_id` are added to the event's attrs object
+// alongside any caller-supplied attrs. backend is a short tag like
+// "cuda" / "rocm" / "metal"; queue_id is an embedder-chosen string
+// stably identifying the queue/stream (e.g., the cudaStream_t pointer
+// rendered as hex). Both can be empty if the embedder doesn't track
+// them, but downstream filtering/grouping will be weaker.
+void     loom_device_span_emit(const char* name,    size_t name_len,
+                               uint64_t    dur_ns,
+                               const char* backend, size_t backend_len,
+                               const char* queue_id,size_t queue_id_len,
+                               const uint8_t* attrs, size_t attrs_len);
+
 // ── Metrics ─────────────────────────────────────────────────────────────
 // Every metric carries a value AND optional attributes. value is emitted
 // directly into the JSON event; attrs are decoded and merged.

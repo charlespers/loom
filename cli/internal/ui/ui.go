@@ -45,6 +45,12 @@ func CategoryColor(cat string) lipgloss.TerminalColor {
 	switch cat {
 	case "span":
 		return cSpan
+	case "device_span":
+		// Device spans share the span accent intentionally — they're a
+		// timing measurement of the same logical work, just resolved
+		// asynchronously on an accelerator. The render code disambiguates
+		// via section heading and label, not color.
+		return cSpan
 	case "metric":
 		return cMetric
 	case "audit":

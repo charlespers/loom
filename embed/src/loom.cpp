@@ -479,6 +479,68 @@ extern "C" void loom_span_emit(const char* name, size_t name_len,
   write_event("span", seq, now_ns, body);
 }
 
+extern "C" void loom_device_span_emit(const char* name,    size_t name_len,
+                                       uint64_t    dur_ns,
+                                       const char* backend, size_t backend_len,
+                                       const char* queue_id,size_t queue_id_len,
+                                       const uint8_t* attrs, size_t attrs_len) {
+  using namespace loom::detail;
+  State& s = state();
+  if (!s.active.load(std::memory_order_acquire)) return;
+  if (!name || name_len == 0) return;
+
+  std::string attrs_json;
+  if (attrs && attrs_len) append_attrs_json(attrs, attrs_len, attrs_json);
+  std::string name_str(name, name_len);
+
+  // Per-(name) device_span_stats — parallel to span_stats so a render
+  // path can show CPU and device timing for the same logical name as
+  // separate rows in the percentile table.
+  {
+    std::lock_guard<std::mutex> lk(s.span_stats_mutex);
+    auto& st = s.device_span_stats[name_str];
+    st.count++;
+    st.total_ns += dur_ns;
+    if (dur_ns < st.min_ns) st.min_ns = dur_ns;
+    if (dur_ns > st.max_ns) st.max_ns = dur_ns;
+    if (st.samples.size() < kMaxSpanSamples) st.samples.push_back(dur_ns);
+  }
+  s.count_device_span.fetch_add(1, std::memory_order_relaxed);
+
+  uint64_t seq    = s.seq.fetch_add(1, std::memory_order_relaxed);
+  uint64_t now_ns = now_unix_ns();
+
+  std::string body;
+  body.reserve(96 + name_len + backend_len + queue_id_len + attrs_json.size());
+  body += ",\"name\":";
+  append_json_string(name_str.data(), name_str.size(), body);
+  body += ",\"dur_ns\":";
+  body += std::to_string(dur_ns);
+
+  // attrs object: backend + queue_id are merged in alongside any
+  // caller-supplied attrs. Empty backend/queue_id are skipped.
+  body += ",\"attrs\":{";
+  bool wrote = false;
+  if (backend && backend_len) {
+    body += "\"backend\":";
+    append_json_string(backend, backend_len, body);
+    wrote = true;
+  }
+  if (queue_id && queue_id_len) {
+    if (wrote) body.push_back(',');
+    body += "\"queue_id\":";
+    append_json_string(queue_id, queue_id_len, body);
+    wrote = true;
+  }
+  if (!attrs_json.empty()) {
+    if (wrote) body.push_back(',');
+    body += attrs_json;
+  }
+  body.push_back('}');
+
+  write_event("device_span", seq, now_ns, body);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Public C ABI — Metrics
 // ─────────────────────────────────────────────────────────────────────────
@@ -848,35 +910,50 @@ void write_manifest(State& s, uint64_t end_unix_ns, uint64_t duration_ms) {
   out += "  \"counts\": {\n";
   out += "    \"events_total\": " + std::to_string(s.seq.load()) + ",\n";
   out += "    \"by_category\": {\n";
-  out += "      \"span\": "      + std::to_string(s.count_span.load())      + ",\n";
-  out += "      \"metric\": "    + std::to_string(s.count_metric.load())    + ",\n";
-  out += "      \"audit\": "     + std::to_string(s.count_audit.load())     + ",\n";
-  out += "      \"lifecycle\": " + std::to_string(s.count_lifecycle.load()) + ",\n";
-  out += "      \"error\": "     + std::to_string(s.count_error.load())     + "\n";
+  out += "      \"span\": "        + std::to_string(s.count_span.load())        + ",\n";
+  out += "      \"device_span\": " + std::to_string(s.count_device_span.load()) + ",\n";
+  out += "      \"metric\": "      + std::to_string(s.count_metric.load())      + ",\n";
+  out += "      \"audit\": "       + std::to_string(s.count_audit.load())       + ",\n";
+  out += "      \"lifecycle\": "   + std::to_string(s.count_lifecycle.load())   + ",\n";
+  out += "      \"error\": "       + std::to_string(s.count_error.load())       + "\n";
   out += "    }\n";
   out += "  },\n";
+
+  // Per-name stats — emit CPU spans and device spans as parallel
+  // blocks so a downstream renderer can join on name and show both
+  // tiers side-by-side. The map iteration order is hash-defined; the
+  // renderer is expected to sort. See `loom show` / `loom report`.
+  auto emit_stats_block = [&](const std::unordered_map<std::string,
+                                                       SpanStats>& m) {
+    bool first = true;
+    for (auto& kv : m) {
+      auto& st = kv.second;
+      uint64_t p50 = percentile(st.samples, 50.0);
+      uint64_t p95 = percentile(st.samples, 95.0);
+      uint64_t p99 = percentile(st.samples, 99.0);
+      if (!first) out += ",\n";
+      first = false;
+      out += "      ";
+      append_json_string(kv.first, out);
+      out += ": {";
+      out += "\"count\":"     + std::to_string(st.count);
+      out += ",\"total_ns\":" + std::to_string(st.total_ns);
+      out += ",\"min_ns\":"   + std::to_string(st.min_ns == UINT64_MAX ? 0 : st.min_ns);
+      out += ",\"max_ns\":"   + std::to_string(st.max_ns);
+      out += ",\"p50_ns\":"   + std::to_string(p50);
+      out += ",\"p95_ns\":"   + std::to_string(p95);
+      out += ",\"p99_ns\":"   + std::to_string(p99);
+      out += "}";
+    }
+  };
   out += "  \"spans\": {\n";
   out += "    \"by_name\": {\n";
-  bool first = true;
-  for (auto& kv : s.span_stats) {
-    auto& st = kv.second;
-    uint64_t p50 = percentile(st.samples, 50.0);
-    uint64_t p95 = percentile(st.samples, 95.0);
-    uint64_t p99 = percentile(st.samples, 99.0);
-    if (!first) out += ",\n";
-    first = false;
-    out += "      ";
-    append_json_string(kv.first, out);
-    out += ": {";
-    out += "\"count\":"   + std::to_string(st.count);
-    out += ",\"total_ns\":" + std::to_string(st.total_ns);
-    out += ",\"min_ns\":"   + std::to_string(st.min_ns == UINT64_MAX ? 0 : st.min_ns);
-    out += ",\"max_ns\":"   + std::to_string(st.max_ns);
-    out += ",\"p50_ns\":"   + std::to_string(p50);
-    out += ",\"p95_ns\":"   + std::to_string(p95);
-    out += ",\"p99_ns\":"   + std::to_string(p99);
-    out += "}";
-  }
+  emit_stats_block(s.span_stats);
+  out += "\n    }\n";
+  out += "  },\n";
+  out += "  \"device_spans\": {\n";
+  out += "    \"by_name\": {\n";
+  emit_stats_block(s.device_span_stats);
   out += "\n    }\n";
   out += "  },\n";
   out += "  \"audit_chain\": {\n";
@@ -982,20 +1059,27 @@ void write_summary(State& s, uint64_t end_unix_ns, uint64_t duration_ms) {
 
   // Event counts
   out += "## Events\n\n";
-  out += "| Category | Count |\n|---|---:|\n";
-  out += "| span      | " + std::to_string(s.count_span.load())      + " |\n";
-  out += "| metric    | " + std::to_string(s.count_metric.load())    + " |\n";
-  out += "| audit     | " + std::to_string(s.count_audit.load())     + " |\n";
-  out += "| lifecycle | " + std::to_string(s.count_lifecycle.load()) + " |\n";
-  out += "| error     | " + std::to_string(s.count_error.load())     + " |\n";
-  out += "| **total** | **" + std::to_string(s.seq.load())           + "** |\n\n";
+  out += "| Category    | Count |\n|---|---:|\n";
+  out += "| span        | " + std::to_string(s.count_span.load())        + " |\n";
+  out += "| device_span | " + std::to_string(s.count_device_span.load()) + " |\n";
+  out += "| metric      | " + std::to_string(s.count_metric.load())      + " |\n";
+  out += "| audit       | " + std::to_string(s.count_audit.load())       + " |\n";
+  out += "| lifecycle   | " + std::to_string(s.count_lifecycle.load())   + " |\n";
+  out += "| error       | " + std::to_string(s.count_error.load())       + " |\n";
+  out += "| **total**   | **" + std::to_string(s.seq.load())             + "** |\n\n";
 
-  // Spans by total time
-  if (!s.span_stats.empty()) {
-    out += "## Spans by total time\n\n";
+  // Render a per-name span stats block as a Markdown table sorted by
+  // total_ns descending. Used for both CPU spans and device spans.
+  auto render_span_table = [&](const char* heading,
+                               const std::unordered_map<std::string,
+                                                        SpanStats>& m) {
+    if (m.empty()) return;
+    out += "## ";
+    out += heading;
+    out += "\n\n";
     out += "| Name | Count | Total | Mean | p50 | p95 | p99 | Max |\n";
     out += "|---|---:|---:|---:|---:|---:|---:|---:|\n";
-    std::vector<std::pair<std::string, SpanStats>> rows(s.span_stats.begin(), s.span_stats.end());
+    std::vector<std::pair<std::string, SpanStats>> rows(m.begin(), m.end());
     std::sort(rows.begin(), rows.end(),
               [](auto& a, auto& b) { return a.second.total_ns > b.second.total_ns; });
     for (auto& kv : rows) {
@@ -1014,7 +1098,9 @@ void write_summary(State& s, uint64_t end_unix_ns, uint64_t duration_ms) {
              + format_duration_ns(st.max_ns) + " |\n";
     }
     out += "\n";
-  }
+  };
+  render_span_table("Spans by total time",        s.span_stats);
+  render_span_table("Device spans by total time", s.device_span_stats);
 
   // Audit chain
   out += "## Audit\n\n";

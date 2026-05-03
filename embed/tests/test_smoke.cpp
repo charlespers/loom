@@ -196,6 +196,46 @@ TEST(SpanEmit, RecordsCallerSuppliedDuration) {
   EXPECT_NE(manifest.find("\"forward.layer\""), std::string::npos);
 }
 
+TEST(DeviceSpanEmit, RecordsCatAndAttrs) {
+  LoomEnv env;
+  const char kRunID[] = "01J3KTV6S5DEVICESPANTEST00";
+  setenv("LOOM_RUN_ID", kRunID, 1);
+  ASSERT_EQ(loom::init(), 0);
+
+  // Two GPU stages on two different streams. Backend + queue_id flow
+  // into attrs; per-name device_span_stats accumulate independently of
+  // the CPU span_stats table.
+  loom::device_span_emit("forward.attn_decode", 500'000ull, "cuda", "0x7fb1");
+  loom::device_span_emit("forward.attn_decode", 480'000ull, "cuda", "0x7fb1",
+                         {{"layer", int64_t{0}}});
+  loom::device_span_emit("forward.ffn_gate_up", 1'200'000ull, "cuda", "0x7fb1");
+  loom::shutdown();
+
+  std::string events = slurp(env.home() + "/runs/" + kRunID + "/events.jsonl");
+  ASSERT_FALSE(events.empty());
+
+  // Wire-format invariants:
+  //   - cat="device_span"
+  //   - dur_ns is exactly the value passed in
+  //   - backend + queue_id appear inside attrs
+  //   - caller-supplied attrs round-trip
+  EXPECT_EQ(count_substring(events, "\"cat\":\"device_span\""), 3u);
+  EXPECT_NE(events.find("\"dur_ns\":500000"),  std::string::npos);
+  EXPECT_NE(events.find("\"dur_ns\":480000"),  std::string::npos);
+  EXPECT_NE(events.find("\"dur_ns\":1200000"), std::string::npos);
+  EXPECT_NE(events.find("\"backend\":\"cuda\""), std::string::npos);
+  EXPECT_NE(events.find("\"queue_id\":\"0x7fb1\""), std::string::npos);
+  EXPECT_NE(events.find("\"layer\":0"), std::string::npos);
+
+  // Manifest exposes a parallel device_spans block AND keeps spans
+  // empty (we only emitted device spans here).
+  std::string manifest = slurp(env.home() + "/runs/" + kRunID + "/manifest.json");
+  EXPECT_NE(manifest.find("\"device_spans\""), std::string::npos);
+  EXPECT_NE(manifest.find("\"forward.attn_decode\""), std::string::npos);
+  // by_category counter should reflect 3 device_spans.
+  EXPECT_NE(manifest.find("\"device_span\": 3"), std::string::npos);
+}
+
 TEST(SpanEmit, NoopWhenInactive) {
   LoomEnv env;
   unsetenv("LOOM_RUN_ID");

@@ -95,18 +95,33 @@ func Render(runDir string) (string, error) {
 	c := m.Counts
 	parts := []string{
 		colored("span", c.ByCategory["span"]),
+	}
+	// device_span is only added to the byline when at least one was
+	// recorded, so CPU-only runs stay tight.
+	if c.ByCategory["device_span"] > 0 {
+		parts = append(parts, colored("device_span", c.ByCategory["device_span"]))
+	}
+	parts = append(parts,
 		colored("metric", c.ByCategory["metric"]),
 		colored("audit", c.ByCategory["audit"]),
 		colored("lifecycle", c.ByCategory["lifecycle"]),
 		colored("error", c.ByCategory["error"]),
-	}
+	)
 	sb.WriteString(strings.Join(parts, "   ") +
 		ui.Soft.Render(fmt.Sprintf("   total %d", c.EventsTotal)) +
 		"\n\n")
 
 	// Top spans by total time, up to 5.
-	if rows := topSpans(m, 5); len(rows) > 0 {
+	if rows := topSpansFrom(m.Spans, 5); len(rows) > 0 {
 		sb.WriteString(ui.Eyebrow.Render("SPANS  by total time") + "\n")
+		sb.WriteString(rows + "\n\n")
+	}
+	// Device spans (cat="device_span") — measured on an asynchronous
+	// accelerator (cudaEvent / hipEvent / etc.) and rendered as a
+	// parallel block so CPU dispatch time and device residency are
+	// distinguishable for the same logical span name.
+	if rows := topSpansFrom(m.DeviceSpans, 5); len(rows) > 0 {
+		sb.WriteString(ui.Eyebrow.Render("DEVICE SPANS  by total time") + "\n")
 		sb.WriteString(rows + "\n\n")
 	}
 
@@ -141,7 +156,14 @@ func colored(cat string, n uint64) string {
 }
 
 func topSpans(m *runinfo.Manifest, limit int) string {
-	if m.Spans == nil {
+	return topSpansFrom(m.Spans, limit)
+}
+
+// topSpansFrom renders a "by total time" table from any per-name
+// span_stats block in the manifest — the same shape is used by both
+// `spans.by_name` (CPU) and `device_spans.by_name` (GPU/NPU).
+func topSpansFrom(raw json.RawMessage, limit int) string {
+	if raw == nil {
 		return ""
 	}
 	var wrapper struct {
@@ -154,7 +176,10 @@ func topSpans(m *runinfo.Manifest, limit int) string {
 			MaxNS   uint64 `json:"max_ns"`
 		} `json:"by_name"`
 	}
-	if err := json.Unmarshal(m.Spans, &wrapper); err != nil {
+	if err := json.Unmarshal(raw, &wrapper); err != nil {
+		return ""
+	}
+	if len(wrapper.ByName) == 0 {
 		return ""
 	}
 	type row struct {

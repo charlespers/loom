@@ -154,6 +154,21 @@ inline void span_emit(std::string_view name, uint64_t dur_ns,
   loom_span_emit(name.data(), name.size(), dur_ns, b.bytes, b.len);
 }
 
+// Emit a device-side span (cat="device_span"). For an embedder using
+// CUDA: cudaEventRecord at start, cudaEventRecord at stop, then at a
+// deferred sync point cudaEventElapsedTime → ns → device_span_emit.
+inline void device_span_emit(std::string_view name, uint64_t dur_ns,
+                             std::string_view backend  = "",
+                             std::string_view queue_id = "",
+                             std::initializer_list<Attr> attrs = {}) noexcept {
+  auto b = detail::encode(attrs);
+  loom_device_span_emit(name.data(),     name.size(),
+                        dur_ns,
+                        backend.data(),  backend.size(),
+                        queue_id.data(), queue_id.size(),
+                        b.bytes, b.len);
+}
+
 // ── Metrics ───────────────────────────────────────────────────────────────
 inline void metric_i64(std::string_view name, int64_t value,
                        std::initializer_list<Attr> attrs = {}) noexcept {
