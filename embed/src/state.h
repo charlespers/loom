@@ -78,6 +78,16 @@ struct State {
   std::string os_arch;
   std::string kernel_release;
 
+  // ── Reproducibility metadata (env-supplied at init) ──────────────────
+  // Keys read from LOOM_MODEL_ID, LOOM_MODEL_HASH, LOOM_PROMPT_VERSION,
+  // LOOM_SEED, LOOM_RUN_TAG. Captured once at init; landed verbatim in
+  // manifest.json so a regulator can replay a decision later.
+  std::string repro_model_id;
+  std::string repro_model_hash;
+  std::string repro_prompt_version;
+  std::string repro_seed;
+  std::string repro_tag;
+
   // ── Open files ───────────────────────────────────────────────────────
   std::FILE* events_file        = nullptr;
   std::FILE* audit_file         = nullptr;
