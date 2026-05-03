@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/charlespers/loom/cli/internal/report"
 	"github.com/charlespers/loom/cli/internal/run"
 	"github.com/charlespers/loom/cli/internal/stub"
 	"github.com/charlespers/loom/cli/internal/verify"
@@ -43,10 +44,10 @@ func main() {
 	root.AddCommand(runCmd)
 
 	root.AddCommand(verify.Cmd())
+	root.AddCommand(report.Cmd())
 
 	root.AddCommand(&cobra.Command{Use: "watch", Short: "Live TUI", RunE: stub.NotImplementedYet("M4")})
 	root.AddCommand(&cobra.Command{Use: "view", Short: "Static TUI", RunE: stub.NotImplementedYet("M4")})
-	root.AddCommand(&cobra.Command{Use: "report", Short: "Render report.html", RunE: stub.NotImplementedYet("M3")})
 	root.AddCommand(&cobra.Command{Use: "redact", Short: "Re-run redactor", RunE: stub.NotImplementedYet("M3")})
 	root.AddCommand(&cobra.Command{Use: "doctor", Short: "Env diagnostic", RunE: stub.NotImplementedYet("M7")})
 
