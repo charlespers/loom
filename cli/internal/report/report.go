@@ -163,16 +163,21 @@ func Build(runDir string) (*ReportData, error) {
 	// Read the canonical audit file (private; we still embed it because
 	// the report.html lives in the same directory and inherits the same
 	// trust boundary as audit.jsonl itself).
+	//
+	// scriptSafe replaces "</" with "<\\/" so an audit record whose
+	// content contains the seven-byte sequence "</script" cannot break
+	// out of the JSON island. "\/" is a valid JSON escape for "/", so
+	// the bytes remain semantically identical when JSON.parse'd.
 	auditPath := filepath.Join(runDir, "audit.jsonl")
 	if auditBytes, err := os.ReadFile(auditPath); err == nil {
 		rd.AuditRecords = collectAuditRows(auditBytes)
-		rd.AuditJSON = htmltemplate.JS(string(auditBytes))
+		rd.AuditJSON = htmltemplate.JS(scriptSafe(string(auditBytes)))
 	}
 
 	// Embed events.jsonl for the in-browser filter UI. We minify by
 	// stripping intra-line whitespace per record (none should exist
 	// already — emitter emits dense JSON).
-	rd.EventsJSON = htmltemplate.JS(serializeEvents(events))
+	rd.EventsJSON = htmltemplate.JS(scriptSafe(serializeEvents(events)))
 	return rd, nil
 }
 
@@ -255,6 +260,15 @@ func serializeEvents(events []rawEvent) string {
 	}
 	b.WriteByte(']')
 	return b.String()
+}
+
+// scriptSafe replaces "</" with "<\\/" so user-controlled JSON content
+// embedded in a <script> block cannot break out of the JSON island via
+// "</script>". "\/" is a valid JSON escape for "/" (RFC 8259 § 7), so
+// the JSON parser yields identical strings either way. Defends against
+// an audit record whose name or attribute contains "</script".
+func scriptSafe(s string) string {
+	return strings.ReplaceAll(s, "</", `<\/`)
 }
 
 func collectLifecycles(events []rawEvent) []LifecycleEntry {

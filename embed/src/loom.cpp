@@ -218,10 +218,17 @@ extern "C" int loom_init(void) {
   s.start_unix_ns = now_unix_ns();
   capture_process(s);
 
-  // Reproducibility metadata. Each is optional; absent values simply
-  // don't appear in manifest.json. Auditors look here to replay a
-  // decision later: same model + same prompt version + same seed
-  // should produce the same output_hash.
+  // Reproducibility metadata. By default each is optional; absent
+  // values simply don't appear in manifest.json. Auditors look here to
+  // replay a decision later: same model + same prompt version + same
+  // seed should produce the same output_hash.
+  //
+  // LOOM_STRICT_REPRO=1 (default-on for `loom export`) makes the
+  // mandatory subset required: model_id, model_hash, prompt_version
+  // must all be set or init fails. This is the right mode for finance
+  // / legal / IRB use cases (intent.md § "use cases") where a run
+  // without provenance is worse than no run at all — the manifest
+  // would otherwise look auditable but be unrepliable.
   auto getenv_str = [](const char* name) -> std::string {
     const char* v = std::getenv(name);
     return v ? std::string(v) : std::string();
@@ -231,6 +238,23 @@ extern "C" int loom_init(void) {
   s.repro_prompt_version = getenv_str("LOOM_PROMPT_VERSION");
   s.repro_seed           = getenv_str("LOOM_SEED");
   s.repro_tag            = getenv_str("LOOM_RUN_TAG");
+
+  const char* strict_env = std::getenv("LOOM_STRICT_REPRO");
+  bool strict = strict_env && *strict_env && strict_env[0] != '0';
+  if (strict) {
+    const char* missing = nullptr;
+    if (s.repro_model_id.empty())       missing = "LOOM_MODEL_ID";
+    else if (s.repro_model_hash.empty())     missing = "LOOM_MODEL_HASH";
+    else if (s.repro_prompt_version.empty()) missing = "LOOM_PROMPT_VERSION";
+    if (missing) {
+      std::fprintf(stderr,
+        "loom: LOOM_STRICT_REPRO=1 set, but %s is empty. Refusing to "
+        "init a run without reproducibility provenance — set the env "
+        "var or unset LOOM_STRICT_REPRO.\n", missing);
+      std::fflush(stderr);
+      return -1;
+    }
+  }
 
   mkdir_p(s.artifact_dir);
 

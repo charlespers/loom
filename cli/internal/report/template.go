@@ -727,14 +727,21 @@ const reportTemplate = `<!doctype html>
     }
     var declared = declaredHead;
     if (auditLines.length === 0) declared = '0'.repeat(64);
-    if (prev !== declared && !(auditLines.length === 0 && declared === '0'.repeat(64))) {
-      // Manifest head can lag if the declared head field is stale; treat
-      // chain-internal validity as the success criterion.
-      stat.textContent = '✓ ' + auditLines.length + ' records · head ' + prev.slice(0,8) + '…' + prev.slice(-4);
-    } else {
+    var matchesDeclared = (prev === declared) || (auditLines.length === 0 && declared === '0'.repeat(64));
+    if (matchesDeclared) {
       stat.textContent = '✓ ' + auditLines.length + ' records · matches declared head';
+      stat.className = 'verify-status ok';
+    } else {
+      // Chain is internally valid but the manifest's recorded head does
+      // not match the head computed from the audit records. This is a
+      // tampering signal — either the manifest was edited, the chain
+      // was truncated, or extra records were appended after finalize.
+      // Do NOT report green.
+      stat.textContent = '⚠ chain internally valid but manifest head mismatch — '
+        + 'computed ' + prev.slice(0,8) + '…' + prev.slice(-4)
+        + ', declared ' + declared.slice(0,8) + '…' + declared.slice(-4);
+      stat.className = 'verify-status fail';
     }
-    stat.className = 'verify-status ok';
     btn.disabled = false;
   }
   btn.addEventListener('click', verifyChain);
