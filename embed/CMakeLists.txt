@@ -1,5 +1,7 @@
 add_library(loom STATIC
   src/loom.cpp
+  src/attrs.cpp
+  src/sha256.cpp
   src/hooks.cpp
 )
 

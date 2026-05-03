@@ -8,6 +8,7 @@ import (
 
 	"github.com/charlespers/loom/cli/internal/run"
 	"github.com/charlespers/loom/cli/internal/stub"
+	"github.com/charlespers/loom/cli/internal/verify"
 	"github.com/charlespers/loom/cli/internal/version"
 	"github.com/spf13/cobra"
 )
@@ -41,11 +42,12 @@ func main() {
 	runCmd.Flags().Bool("quiet", false, "suppress the run-id banner")
 	root.AddCommand(runCmd)
 
+	root.AddCommand(verify.Cmd())
+
 	root.AddCommand(&cobra.Command{Use: "watch", Short: "Live TUI", RunE: stub.NotImplementedYet("M4")})
 	root.AddCommand(&cobra.Command{Use: "view", Short: "Static TUI", RunE: stub.NotImplementedYet("M4")})
-	root.AddCommand(&cobra.Command{Use: "report", Short: "Render report", RunE: stub.NotImplementedYet("M5")})
-	root.AddCommand(&cobra.Command{Use: "verify", Short: "Verify chain", RunE: stub.NotImplementedYet("M3")})
-	root.AddCommand(&cobra.Command{Use: "redact", Short: "Re-run pipe", RunE: stub.NotImplementedYet("M3")})
+	root.AddCommand(&cobra.Command{Use: "report", Short: "Render report.html", RunE: stub.NotImplementedYet("M3")})
+	root.AddCommand(&cobra.Command{Use: "redact", Short: "Re-run redactor", RunE: stub.NotImplementedYet("M3")})
 	root.AddCommand(&cobra.Command{Use: "doctor", Short: "Env diagnostic", RunE: stub.NotImplementedYet("M7")})
 
 	if err := root.Execute(); err != nil {
